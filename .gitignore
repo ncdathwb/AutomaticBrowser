@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+
+.runtime/
+chrome_profile/
+.vscode/
+
+.venv/
+venv/
+.env
+
+.pytest_cache/
