@@ -121,12 +121,12 @@ def build_browser_config(
     app_config: AppConfig | None = None,
     env: Mapping[str, str] | None = None,
 ) -> BrowserConfig:
-    current_env = os.environ if env is None else env
-    current_app_config = build_app_config(current_env) if app_config is None else app_config
+    if app_config is None:
+        app_config = build_app_config(env)
 
     return BrowserConfig(
-        profile_dir=current_app_config.data_dir / "chrome_profile",
-        driver_path_cache_file=current_app_config.runtime_dir / "chromedriver_path.txt",
+        profile_dir=app_config.data_dir / "chrome_profile",
+        driver_path_cache_file=app_config.runtime_dir / "chromedriver_path.txt",
     )
 
 

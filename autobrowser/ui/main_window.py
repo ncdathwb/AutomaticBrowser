@@ -25,6 +25,8 @@ from autobrowser.ui.settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
+LOG_DRAWER_DRAG_MIN_HEIGHT = 150
+
 
 class AutoBrowserWindow(QMainWindow):
     def __init__(self):
@@ -250,7 +252,7 @@ class AutoBrowserWindow(QMainWindow):
         if len(sizes) < 2:
             return
         log_h = sizes[1]
-        drag_min = 150
+        drag_min = LOG_DRAWER_DRAG_MIN_HEIGHT
 
         if log_h < drag_min:
             self._suppress_splitter_event = True
@@ -283,7 +285,9 @@ class AutoBrowserWindow(QMainWindow):
         event.accept()
         self.hide()
         self.controller.stop_timers()
-        threading.Thread(
+        shutdown_thread = threading.Thread(
             target=self.controller.shutdown,
-            daemon=True,
-        ).start()
+            daemon=False,
+        )
+        shutdown_thread.start()
+        shutdown_thread.join(timeout=8.0)

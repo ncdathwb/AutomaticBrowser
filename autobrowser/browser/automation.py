@@ -39,6 +39,7 @@ QR_TIMEOUT_KEYWORDS = (
     "time out", "timed out", "expired", "expire", "error occurred",
 )
 QR_VERIFY_URL_KEYWORDS = ("loginverify", "verify")
+NETWORK_INFO_TIMEOUT_MS = 5000
 
 LOGIN_ACCOUNT_ENV = "AUTOBROWSER_LOGIN_ACCOUNT"
 LOGIN_PASSWORD_ENV = "AUTOBROWSER_LOGIN_PASSWORD"
@@ -110,11 +111,6 @@ def open_target_site(
             raise ExternalLoginRequired(url, message)
 
         logger.info("Đã gửi yêu cầu đăng nhập")
-        # ----------------------------
-
-
-
-        #-----------------------------
         select_live_browser_window(driver)
         return driver.current_url
 
@@ -216,7 +212,7 @@ def type_login_credentials(
 
 def _read_all_page_text(driver: WebDriver) -> str:
     try:
-        result = driver.execute_script("""
+        result = driver.execute_script(r"""
             function collectText(root, texts) {
                 if (!root) return;
                 if (root.body) {
@@ -293,7 +289,7 @@ def _dismiss_alert(driver: WebDriver) -> None:
         logger.debug("Không phải JavaScript alert")
 
     close_selectors = [
-        "//button[contains(translate(text(), 'CLOSE', 'close'), 'close')]",
+        "//button[contains(text(), 'Close') or contains(text(), 'CLOSE') or contains(text(), 'close')]",
         "//button[contains(@class, 'close') or contains(@class, 'btn-close')]",
         "//button[@aria-label='Close']",
         "//*[@aria-label='Close']",
@@ -1040,6 +1036,7 @@ def _collect_browser_network_info(driver: WebDriver) -> tuple[str, dict]:
         network_info = driver.execute_async_script(r"""
             var callback = arguments[arguments.length - 1];
             var finished = false;
+            var timeoutMs = arguments[0] || 5000;
 
             function done(payload) {
                 if (!finished) {
@@ -1068,8 +1065,8 @@ def _collect_browser_network_info(driver: WebDriver) -> tuple[str, dict]:
 
             setTimeout(function() {
                 done({externalIp: '', headers: {}, timedOut: true});
-            }, 5000);
-        """)
+            }, timeoutMs);
+        """, NETWORK_INFO_TIMEOUT_MS)
         data = json.loads(network_info)
     except (WebDriverException, json.JSONDecodeError, TypeError):
         logger.info("IP Chrome   : không xác định được")

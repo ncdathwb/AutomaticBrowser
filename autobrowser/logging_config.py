@@ -1,4 +1,5 @@
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 
 from autobrowser.config import APP_CONFIG, AppConfig
@@ -10,7 +11,14 @@ LOG_BACKUP_COUNT = 3
 
 
 def configure_logging(config: AppConfig = APP_CONFIG) -> None:
-    config.log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        config.log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        print(
+            f"Không thể tạo thư mục logs: {config.log_dir}",
+            file=sys.stderr,
+        )
+        return
 
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, config.log_level, logging.INFO))

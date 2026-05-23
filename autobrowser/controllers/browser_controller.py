@@ -206,7 +206,6 @@ class BrowserController(QObject):
             stop_taskbar_flash(self.window_hwnd)
         except Exception:
             logger.debug("Không tắt được trạng thái nhấp nháy trên thanh tác vụ", exc_info=True)
-            pass
 
     def show_external_login_prompt(
         self,
@@ -229,7 +228,6 @@ class BrowserController(QObject):
             resize_embedded_window(self.session.hwnd, width, height)
         except Exception:
             logger.debug("Không đổi được kích thước trình duyệt đã nhúng", exc_info=True)
-            pass
 
     def focus_browser(
         self,
