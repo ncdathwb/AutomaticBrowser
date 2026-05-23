@@ -1,12 +1,44 @@
 import json
+import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 CONFIG_FILENAME = "proxy_config.json"
+_ENCRYPTED_MARKER = "_encrypted"
+
+
+def _encrypt_password(password: str) -> str:
+    if not password:
+        return password
+    if sys.platform != "win32":
+        return password
+    try:
+        from autobrowser.crypto_win import encrypt
+        return encrypt(password)
+    except Exception:
+        logger.debug("DPAPI encrypt unavailable, storing plaintext", exc_info=True)
+        return password
+
+
+def _decrypt_password(password: str) -> str:
+    if not password:
+        return password
+    if sys.platform != "win32":
+        return password
+    try:
+        from autobrowser.crypto_win import decrypt
+        return decrypt(password)
+    except Exception:
+        logger.debug("DPAPI decrypt unavailable, using raw value", exc_info=True)
+        return password
 
 
 @dataclass(frozen=True)
 class ProxyConfig:
+    """Proxy configuration. Password is transparently encrypted via DPAPI on save/load."""
     enabled: bool = False
     type: str = "http"
     host: str = ""
@@ -26,13 +58,14 @@ def load_proxy_config(data_dir: Path) -> ProxyConfig:
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        raw_password = str(data.get("password", ""))
         return ProxyConfig(
             enabled=bool(data.get("enabled", False)),
             type=data.get("type", "http"),
             host=str(data.get("host", "")),
             port=int(data.get("port", 8080)),
             username=str(data.get("username", "")),
-            password=str(data.get("password", "")),
+            password=_decrypt_password(raw_password),
         )
     except (json.JSONDecodeError, OSError, ValueError):
         return ProxyConfig()
@@ -49,7 +82,8 @@ def save_proxy_config(config: ProxyConfig, data_dir: Path) -> bool:
                     "host": config.host,
                     "port": config.port,
                     "username": config.username,
-                    "password": config.password,
+                    "password": _encrypt_password(config.password),
+                    _ENCRYPTED_MARKER: True,
                 },
                 indent=2,
             ),

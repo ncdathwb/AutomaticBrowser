@@ -3,16 +3,19 @@ import threading
 import time
 
 from PyQt5.QtCore import QEvent, QFileInfo, Qt, QTimer
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (
+    QAction,
     QApplication,
     QFileIconProvider,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSplitter,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -36,7 +39,11 @@ class AutoBrowserWindow(QMainWindow):
         self.log_drawer_expanded = True
         self._suppress_splitter_event = False
 
+        self._quit_requested = False
+        self.tray_icon: QSystemTrayIcon | None = None
+
         self.init_ui()
+        self._setup_tray()
         self.connect_controller()
         QTimer.singleShot(0, self.start_controller)
 
@@ -83,12 +90,16 @@ class AutoBrowserWindow(QMainWindow):
         main_layout.addWidget(self.splitter, stretch=1)
 
     def _load_chrome_icon(self) -> None:
-        from autobrowser.browser.external_chrome import find_chrome_executable
-
-        chrome_path = find_chrome_executable()
+        chrome_path = self._find_chrome_path()
         if chrome_path and chrome_path.is_file():
             provider = QFileIconProvider()
             self.setWindowIcon(provider.icon(QFileInfo(str(chrome_path))))
+
+    @staticmethod
+    def _find_chrome_path():
+        from autobrowser.browser.external_chrome import find_chrome_executable
+
+        return find_chrome_executable()
 
     def create_log_drawer(self, splitter: QSplitter) -> None:
         self.log_panel = QFrame()
@@ -294,13 +305,67 @@ class AutoBrowserWindow(QMainWindow):
                 self.log_layout.setSpacing(0)
                 self.log_layout.setContentsMargins(8, 0, 8, 0)
 
+    def _setup_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
+        icon = self.windowIcon()
+        if icon.isNull():
+            icon = QApplication.style().standardIcon(
+                QApplication.style().SP_ComputerIcon
+            )
+
+        tray_menu = QMenu()
+        restore_action = QAction("Hiện cửa sổ", tray_menu)
+        restore_action.triggered.connect(self._restore_from_tray)
+        tray_menu.addAction(restore_action)
+
+        tray_menu.addSeparator()
+
+        exit_action = QAction("Thoát", tray_menu)
+        exit_action.triggered.connect(self._quit_app)
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip(APP_CONFIG.title)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason: int) -> None:
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _quit_app(self) -> None:
+        self._quit_requested = True
+        if self.tray_icon:
+            self.tray_icon.hide()
+        self.close()
+
     def closeEvent(self, event) -> None:
+        if self.tray_icon and self.tray_icon.isVisible() and not self._quit_requested:
+            self.hide()
+            self.tray_icon.showMessage(
+                APP_CONFIG.title,
+                "Ứng dụng vẫn đang chạy trong khay hệ thống.\n"
+                "Nhấp đúp để mở lại, hoặc chuột phải → Thoát.",
+                QSystemTrayIcon.Information,
+                3000,
+            )
+            event.ignore()
+            return
+
         event.accept()
         self.hide()
         self.controller.stop_timers()
         shutdown_thread = threading.Thread(
             target=self.controller.shutdown,
-            daemon=False,
+            daemon=True,
         )
         shutdown_thread.start()
         shutdown_thread.join(timeout=8.0)

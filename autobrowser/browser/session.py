@@ -146,6 +146,9 @@ def build_chrome_options(config: BrowserConfig) -> Options:
     if proxy_arg:
         options.add_argument(proxy_arg)
         if proxy_config.username:
+            # NOTE: proxy credentials are visible in the Chrome process command line
+            # (e.g. via Task Manager / Process Explorer). This is a limitation of
+            # Chrome/chromedriver's --proxy-auth flag, not fixable at the application level.
             options.add_argument(
                 f"--proxy-auth={proxy_config.username}:{proxy_config.password}"
             )

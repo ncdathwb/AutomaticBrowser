@@ -1,0 +1,45 @@
+# Example: Auto-login flow
+# Environment variables ${VAR_NAME} are resolved at runtime.
+name: "Auto Login Flow"
+steps:
+  # Step 1: Navigate to the target site
+  - action: navigate
+    url: "https://www.bhxc969.net/Home/Index"
+
+  # Step 2: Click the login button to open the login form
+  - action: click
+    by: id
+    selector: "loginbutton"
+    timeout: 15
+
+  # Step 3: Wait for the login form to appear
+  - action: wait_element
+    by: id
+    selector: "frmLogin"
+    timeout: 15
+
+  # Step 4: Click account input and type (human-like typing)
+  - action: type
+    by: id
+    selector: "accountId"
+    value: "${AUTOBROWSER_LOGIN_ACCOUNT}"
+    human: true
+    clear: true
+
+  # Step 5: Click password input and type
+  - action: type
+    by: id
+    selector: "accountPwd"
+    value: "${AUTOBROWSER_LOGIN_PASSWORD}"
+    human: true
+    clear: true
+
+  # Step 6: Submit the login form
+  - action: click
+    by: id
+    selector: "signin"
+    timeout: 15
+
+  # Step 7: Wait for post-login page
+  - action: wait_seconds
+    seconds: 3

@@ -45,8 +45,15 @@ NETWORK_INFO_TIMEOUT_MS = 5000
 
 LOGIN_ACCOUNT_ENV = "AUTOBROWSER_LOGIN_ACCOUNT"
 LOGIN_PASSWORD_ENV = "AUTOBROWSER_LOGIN_PASSWORD"
-LOGIN_ACCOUNT = os.environ.get(LOGIN_ACCOUNT_ENV, "").strip()
-LOGIN_PASSWORD = os.environ.get(LOGIN_PASSWORD_ENV, "")
+
+
+def _get_login_account() -> str:
+    return os.environ.get(LOGIN_ACCOUNT_ENV, "").strip()
+
+
+def _get_login_password() -> str:
+    return os.environ.get(LOGIN_PASSWORD_ENV, "")
+
 
 LOGIN_BUTTON_LOCATOR = by_id("loginbutton")
 LOGIN_FORM_LOCATOR = by_id("frmLogin")
@@ -96,7 +103,7 @@ def open_target_site(
         wait_for_login_form(driver)
 
         logger.info("Nhập tài khoản và mật khẩu")
-        credentials_entered = type_login_credentials(driver, LOGIN_ACCOUNT, LOGIN_PASSWORD)
+        credentials_entered = type_login_credentials(driver, _get_login_account(), _get_login_password())
         if not credentials_entered:
             select_live_browser_window(driver)
             return driver.current_url
@@ -271,20 +278,6 @@ def _check_browser_alert(driver: WebDriver) -> str:
         return ""
 
 
-def _debug_alert_text(driver: WebDriver) -> None:
-    try:
-        alert_text = _check_browser_alert(driver)
-        logger.info("DEBUG: Nội dung alert = '%s'", alert_text)
-        logger.info("DEBUG: Độ dài alert = %d", len(alert_text))
-        logger.info("DEBUG: Alert lowercase = '%s'", alert_text.lower())
-
-        for keyword in QR_TIMEOUT_KEYWORDS:
-            if keyword in alert_text:
-                logger.info("DEBUG: Tìm thấy từ khóa timeout: '%s'", keyword)
-    except Exception as e:
-        logger.error("DEBUG: Lỗi khi đọc alert: %s", e)
-
-
 def _dismiss_alert(driver: WebDriver) -> None:
     logger.info("Đang cố gắng đóng alert/dialog...")
     try:
@@ -292,7 +285,14 @@ def _dismiss_alert(driver: WebDriver) -> None:
         logger.info("Đã đóng JavaScript alert")
         return
     except WebDriverException:
-        logger.debug("Không phải JavaScript alert")
+        logger.debug("Không phải JavaScript alert hoặc không accept được")
+
+    try:
+        driver.switch_to.alert.dismiss()
+        logger.info("Đã dismiss JavaScript dialog")
+        return
+    except WebDriverException:
+        logger.debug("Không dismiss được alert")
 
     close_selectors = [
         "//button[contains(text(), 'Close') or contains(text(), 'CLOSE') or contains(text(), 'close')]",
@@ -347,33 +347,6 @@ def _is_qr_passkeys_present(driver: WebDriver) -> bool:
         if keyword in body_text:
             logger.debug("Tìm thấy từ khóa passkey trong body")
             return True
-    return False
-
-
-def _is_qr_timeout_error(driver: WebDriver) -> bool:
-    alert_text = _check_browser_alert(driver)
-    if alert_text:
-        for keyword in QR_TIMEOUT_KEYWORDS:
-            if keyword in alert_text:
-                logger.info(
-                    "PHÁT HIỆN TIMEOUT trong alert: '%s' (từ khóa: '%s')",
-                    alert_text[:100],
-                    keyword,
-                )
-                return True
-        logger.debug("Nội dung alert: '%s' (không có từ khóa timeout)", alert_text[:100])
-
-    body_text = _read_all_page_text(driver)
-    for keyword in QR_TIMEOUT_KEYWORDS:
-        if keyword in body_text:
-            logger.info("PHÁT HIỆN TIMEOUT trong body (từ khóa: '%s')", keyword)
-            return True
-
-    element_text = _find_visible_text_by_keywords(driver, QR_TIMEOUT_KEYWORDS)
-    if element_text:
-        logger.info("PHÁT HIỆN TIMEOUT trong element: '%s'", element_text[:100])
-        return True
-
     return False
 
 
@@ -443,7 +416,7 @@ def _press_escape_for_native_dialog(driver: WebDriver, sleep=time.sleep) -> None
         logger.debug("Không gửi được phím Escape để đóng hộp thoại native", exc_info=True)
 
 
-def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
+def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> bool:
     current_url = _get_current_url(driver)
     _press_escape_for_native_dialog(driver, sleep=sleep)
 
@@ -455,7 +428,7 @@ def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
             driver.get(current_url)
             wait_for_dom_complete(driver)
             logger.info("Đã tải lại trang QR bằng điều hướng browser")
-            return
+            return True
         except WebDriverException:
             logger.debug(
                 "Không điều hướng lại URL hiện tại được, thử CDP Page.navigate",
@@ -466,7 +439,7 @@ def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
             driver.execute_cdp_cmd("Page.navigate", {"url": current_url})
             wait_for_dom_complete(driver)
             logger.info("Đã tải lại trang QR bằng CDP Page.navigate")
-            return
+            return True
         except WebDriverException:
             logger.debug("Không reload được bằng CDP Page.navigate", exc_info=True)
 
@@ -474,7 +447,7 @@ def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
         driver.execute_cdp_cmd("Page.reload", {"ignoreCache": True})
         wait_for_dom_complete(driver)
         logger.info("Đã tải lại trang QR bằng CDP Page.reload")
-        return
+        return True
     except WebDriverException:
         logger.debug("Không reload được bằng CDP Page.reload, thử driver.refresh()", exc_info=True)
 
@@ -482,7 +455,7 @@ def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
         driver.refresh()
         wait_for_dom_complete(driver)
         logger.info("Đã tải lại trang QR bằng driver.refresh()")
-        return
+        return True
     except WebDriverException:
         logger.debug("Không reload được bằng driver.refresh(), thử JavaScript", exc_info=True)
 
@@ -490,19 +463,23 @@ def _reload_page_for_new_qr(driver: WebDriver, sleep=time.sleep) -> None:
         driver.execute_script("location.reload(true)")
         wait_for_dom_complete(driver)
         logger.info("Đã tải lại trang QR bằng JavaScript")
+        return True
     except WebDriverException:
         logger.exception("Không tải lại được trang")
+        return False
 
 
 def _find_visible_text_by_keywords(driver: WebDriver, keywords: tuple[str, ...]) -> str:
     try:
         script = """
             var keywords = arguments[0];
+            var MAX_ELEMENTS = 2000;
             var all = document.querySelectorAll(
                 'div, span, p, h1, h2, h3, h4, h5, h6, '
                 + 'li, td, th, label, button, a, strong, em, b, i'
             );
-            for (var i = 0; i < all.length; i++) {
+            var limit = Math.min(all.length, MAX_ELEMENTS);
+            for (var i = 0; i < limit; i++) {
                 var el = all[i];
                 if (el.offsetParent === null) continue;
                 var text = (el.textContent || '').toLowerCase().trim();

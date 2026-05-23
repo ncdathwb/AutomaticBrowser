@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 from selenium.common.exceptions import WebDriverException
 
 from autobrowser.browser.automation import TARGET_URL, ExternalLoginRequired, run_browser_logic
+from autobrowser.browser.automation_flow import FlowError, load_flow
 from autobrowser.browser.external_chrome import launch_external_chrome
 from autobrowser.browser.session import (
     BrowserSession,
@@ -69,6 +70,9 @@ class BrowserController(QObject):
         self.window_hwnd: int | None = None
         self.external_login_url = TARGET_URL
         self.is_closing = False
+        self.flow_path: str | None = None
+        self._recovering = False
+        self._recovery_count = 0
 
         self._browser_ready.connect(self._on_browser_ready)
         self._navigation_worker_finished.connect(self._on_navigation_finished)
@@ -153,6 +157,10 @@ class BrowserController(QObject):
         )
         self.navigation_thread.start()
 
+    def set_flow(self, flow_path: str) -> None:
+        """Use a YAML flow file instead of the built-in automation logic."""
+        self.flow_path = flow_path
+
     def _navigate_worker(self) -> None:
         automation_logger = logging.getLogger(AUTOMATION_LOGGER_NAME)
         automation_handler = SignalLogHandler(self.log_message)
@@ -163,8 +171,11 @@ class BrowserController(QObject):
             if self.is_closing or not self.session:
                 return
 
-            current_url = run_browser_logic(self.session, APP_CONFIG.data_dir)
-            self._navigation_worker_finished.emit(current_url)
+            if self.flow_path:
+                self._run_flow_worker()
+            else:
+                current_url = run_browser_logic(self.session, APP_CONFIG.data_dir)
+                self._navigation_worker_finished.emit(current_url)
         except ExternalLoginRequired as e:
             logger.info("Cần đăng nhập ngoài: %s", e.url)
             self._external_login_required.emit(e.url, e.message)
@@ -174,6 +185,23 @@ class BrowserController(QObject):
         finally:
             automation_logger.removeHandler(automation_handler)
             automation_handler.close()
+
+    def _run_flow_worker(self) -> None:
+        from pathlib import Path
+
+        from autobrowser.browser.automation_flow import execute_flow
+
+        flow_path = Path(self.flow_path)  # type: ignore[arg-type]
+        flow = load_flow(flow_path)
+        self.log_message.emit(f"Chạy flow: {flow.name} ({len(flow.steps)} bước)")
+
+        session = self.session
+        assert session is not None
+
+        with session.lock:
+            execute_flow(session.driver, flow)
+
+        self._navigation_worker_finished.emit(session.driver.current_url)
 
     def _on_navigation_finished(self, _current_url: str) -> None:
         self.browser_resize_requested.emit()
@@ -225,7 +253,7 @@ class BrowserController(QObject):
         self._health_check_timer.start(HEALTH_CHECK_INTERVAL_MS)
 
     def _check_browser_health(self) -> None:
-        if self.is_closing or not self.session:
+        if self.is_closing or not self.session or self._recovering:
             return
 
         try:
@@ -233,9 +261,46 @@ class BrowserController(QObject):
             with self.session.lock:
                 driver.execute_script("return 1")
         except WebDriverException:
-            self.log_message.emit(
-                "Cảnh báo: Trình duyệt không phản hồi. Có thể đã bị crash hoặc đóng."
-            )
+            self._attempt_recovery()
+
+    def _attempt_recovery(self) -> None:
+        self._recovering = True
+        self._recovery_count += 1
+        self.log_message.emit(
+            f"Trình duyệt không phản hồi — đang tự động khôi phục (lần {self._recovery_count})..."
+        )
+        self.status_changed.emit("Đang khôi phục", "#f0b84f")
+
+        if self._health_check_timer:
+            self._health_check_timer.stop()
+
+        self.stop_browser()
+        self.session = None
+        self.browser_thread = None
+        self.navigation_thread = None
+
+        self.placeholder_text_changed.emit("Đang khôi phục trình duyệt...")
+        self.placeholder_visibility_changed.emit(True)
+
+        self.browser_thread = threading.Thread(
+            target=self._recovery_worker,
+            daemon=True,
+        )
+        self.browser_thread.start()
+
+    def _recovery_worker(self) -> None:
+        try:
+            session = create_browser_session()
+        except Exception as e:
+            logger.exception("Không khôi phục được trình duyệt")
+            self.log_message.emit(f"Khôi phục thất bại: {e} — sẽ thử lại sau 60 giây")
+            self.status_changed.emit("Lỗi khôi phục", "#ff6b6b")
+            self._recovering = False
+            self.start_health_check()
+            return
+
+        self._recovering = False
+        self._browser_ready.emit(session)
 
     def start_resource_monitor(self) -> None:
         if self._resource_timer:
@@ -261,7 +326,7 @@ class BrowserController(QObject):
                 self.log_message.emit(
                     f"Cảnh báo: Chrome đang dùng {rss_mb:.0f} MB RAM (> {MEMORY_WARNING_MB} MB)"
                 )
-        except (psutil.NoSuchProcess, psutil.AccessDenied, WebDriverException, Exception):
+        except (psutil.NoSuchProcess, psutil.AccessDenied, WebDriverException, OSError):
             self.resource_update.emit(0.0, 0.0)
 
     def show_external_login_prompt(
@@ -299,12 +364,14 @@ class BrowserController(QObject):
             focus_embedded_window(self.session.hwnd)
 
     def stop_timers(self) -> None:
-        if self.resize_timer:
-            self.resize_timer.stop()
-            self.resize_timer = None
-        if self.taskbar_flash_timer:
-            self.taskbar_flash_timer.stop()
-            self.taskbar_flash_timer = None
+        for attr in (
+            "resize_timer", "taskbar_flash_timer",
+            "_health_check_timer", "_resource_timer",
+        ):
+            timer = getattr(self, attr, None)
+            if timer:
+                timer.stop()
+                setattr(self, attr, None)
 
     def pause_window_timers(self) -> None:
         if self.resize_timer:

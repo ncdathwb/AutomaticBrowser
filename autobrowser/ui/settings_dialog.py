@@ -243,19 +243,14 @@ class SettingsDialog(QDialog):
         if not save_proxy_config(new_config, self._data_dir):
             QMessageBox.warning(self, "Lỗi", "Không thể ghi file cấu hình proxy.")
             return
-        self.accept()
 
-        if new_config.enabled:
-            QMessageBox.information(
-                self,
-                "Đã lưu proxy",
-                "Cấu hình proxy đã được lưu.\n\n"
-                "Vui lòng khởi động lại ứng dụng để proxy có hiệu lực.",
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "Đã lưu",
-                "Đã tắt proxy.\n\n"
-                "Vui lòng khởi động lại ứng dụng để thay đổi có hiệu lực.",
-            )
+        message = (
+            "Cấu hình proxy đã được lưu.\n\n"
+            "Vui lòng khởi động lại ứng dụng để proxy có hiệu lực."
+        ) if new_config.enabled else (
+            "Đã tắt proxy.\n\n"
+            "Vui lòng khởi động lại ứng dụng để thay đổi có hiệu lực."
+        )
+        title = "Đã lưu proxy" if new_config.enabled else "Đã lưu"
+        self.accept()
+        QMessageBox.information(self.parent(), title, message)
