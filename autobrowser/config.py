@@ -98,6 +98,8 @@ class BrowserConfig:
     hidden_window_position: tuple[int, int] = (-10000, -10000)
     initial_window_size: tuple[int, int] = (1280, 800)
     hwnd_lookup_timeout_seconds: float = 10.0
+    headless: bool = False
+    captcha_api_key: str = ""
 
 
 def build_app_config(env: Mapping[str, str] | None = None) -> AppConfig:
@@ -124,10 +126,20 @@ def build_browser_config(
     if app_config is None:
         app_config = build_app_config(env)
 
+    profile_dir = _resolve_profile_dir(app_config.data_dir)
+
     return BrowserConfig(
-        profile_dir=app_config.data_dir / "chrome_profile",
+        profile_dir=profile_dir,
         driver_path_cache_file=app_config.runtime_dir / "chromedriver_path.txt",
     )
+
+
+def _resolve_profile_dir(data_dir: Path) -> Path:
+    try:
+        from autobrowser.browser.profile_manager import get_active_profile_dir
+        return get_active_profile_dir(data_dir)
+    except Exception:
+        return data_dir / "chrome_profile"
 
 
 load_dotenv_file()

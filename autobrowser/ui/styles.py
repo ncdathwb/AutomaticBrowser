@@ -101,6 +101,30 @@ RESOURCE_LABEL_STYLE = """
     padding: 0 8px;
 """
 
+FILTER_COMBO_STYLE = """
+    QComboBox {
+        background: #263044;
+        color: #a8b2c4;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 6px;
+    }
+    QComboBox:hover { background: #374766; }
+    QComboBox QAbstractItemView {
+        background: #151923;
+        color: #d7dde8;
+        selection-background-color: #263044;
+    }
+    QCheckBox {
+        color: #a8b2c4;
+        background: #263044;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 6px;
+    }
+    QCheckBox:hover { background: #374766; }
+"""
+
 
 def status_label_style(color: str) -> str:
     return f"color: {color}; font-weight: bold;"

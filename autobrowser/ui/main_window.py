@@ -7,6 +7,8 @@ from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
+    QCheckBox,
+    QComboBox,
     QFileIconProvider,
     QFrame,
     QHBoxLayout,
@@ -38,6 +40,7 @@ class AutoBrowserWindow(QMainWindow):
         self.log_layout: QVBoxLayout | None = None
         self.log_drawer_expanded = True
         self._suppress_splitter_event = False
+        self._log_entries: list[tuple[str, str]] = []  # (level, message)
 
         self._quit_requested = False
         self.tray_icon: QSystemTrayIcon | None = None
@@ -146,10 +149,42 @@ class AutoBrowserWindow(QMainWindow):
         self.resource_label = QLabel("")
         self.resource_label.setStyleSheet(styles.RESOURCE_LABEL_STYLE)
 
+        self.log_filter_combo = QComboBox()
+        self.log_filter_combo.addItems(["ALL", "INFO", "WARNING", "ERROR"])
+        self.log_filter_combo.setCurrentText("ALL")
+        self.log_filter_combo.setFocusPolicy(Qt.NoFocus)
+        self.log_filter_combo.setFixedWidth(90)
+        self.log_filter_combo.setStyleSheet(styles.FILTER_COMBO_STYLE)
+        self.log_filter_combo.currentTextChanged.connect(self._apply_log_filter)
+
+        self.auto_scroll_check = QCheckBox("↓")
+        self.auto_scroll_check.setFocusPolicy(Qt.NoFocus)
+        self.auto_scroll_check.setChecked(True)
+        self.auto_scroll_check.setToolTip("Tự động cuộn xuống dòng mới nhất")
+        self.auto_scroll_check.setStyleSheet(styles.FILTER_COMBO_STYLE)
+
+        self.fingerprint_button = QPushButton("FP")
+        self.fingerprint_button.setFocusPolicy(Qt.NoFocus)
+        self.fingerprint_button.setFixedSize(28, 22)
+        self.fingerprint_button.setToolTip("Lịch sử fingerprint")
+        self.fingerprint_button.clicked.connect(self.open_fingerprint_dashboard)
+        self.fingerprint_button.setStyleSheet(styles.LOG_COPY_BUTTON_STYLE)
+
+        self.profile_button = QPushButton("👤")
+        self.profile_button.setFocusPolicy(Qt.NoFocus)
+        self.profile_button.setFixedSize(28, 22)
+        self.profile_button.setToolTip("Quản lý profile")
+        self.profile_button.clicked.connect(self.open_profile_manager)
+        self.profile_button.setStyleSheet(styles.LOG_COPY_BUTTON_STYLE)
+
         log_header.addWidget(self.log_toggle_button)
         log_header.addWidget(self.log_copy_button)
         log_header.addWidget(self.settings_button)
+        log_header.addWidget(self.fingerprint_button)
+        log_header.addWidget(self.profile_button)
         log_header.addStretch()
+        log_header.addWidget(self.auto_scroll_check)
+        log_header.addWidget(self.log_filter_combo)
         log_header.addWidget(self.resource_label)
         log_header.addWidget(self.external_login_button)
         log_header.addWidget(self.status_label)
@@ -193,10 +228,65 @@ class AutoBrowserWindow(QMainWindow):
         rect = self.chrome_frame.rect()
         self.controller.resize_browser(rect.width(), rect.height())
 
+    @staticmethod
+    def _detect_level(msg: str) -> str:
+        lower = msg.lower()
+        if any(kw in lower for kw in ("lỗi", "error", "thất bại", "không thể", "crash")):
+            return "ERROR"
+        if any(kw in lower for kw in ("cảnh báo", "warning", "rủi ro", "phát hiện")):
+            return "WARNING"
+        return "INFO"
+
     def append_log(self, msg: str) -> None:
+        level = self._detect_level(msg)
         logger.info(msg)
+        self._log_entries.append((level, msg))
+
+        if not self._level_visible(level):
+            return
+
         timestamp = time.strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {msg}")
+        prefix = {"ERROR": "  ✕  ", "WARNING": "  ⚠  ", "INFO": "  ●  "}.get(level, "  ●  ")
+        color = {"ERROR": "#ff6b6b", "WARNING": "#f0b84f", "INFO": "#8df0b6"}.get(level, "#8df0b6")
+        self.log_text.append(
+            f'<span style="color:#6b7385">[{timestamp}]</span>'
+            f'<span style="color:{color}">{prefix}{msg}</span>'
+        )
+
+        if self.auto_scroll_check.isChecked():
+            scrollbar = self.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+
+    def _level_visible(self, level: str) -> bool:
+        filt = self.log_filter_combo.currentText()
+        if filt == "ALL":
+            return True
+        return level == filt
+
+    def _apply_log_filter(self) -> None:
+        self._rebuild_log_display()
+
+    def _rebuild_log_display(self) -> None:
+        self.log_text.clear()
+        for level, msg in self._log_entries:
+            if not self._level_visible(level):
+                continue
+            timestamp = time.strftime("%H:%M:%S")
+            prefix = {"ERROR": "  ✕  ", "WARNING": "  ⚠  ", "INFO": "  ●  "}.get(level, "  ●  ")
+            color = {"ERROR": "#ff6b6b", "WARNING": "#f0b84f", "INFO": "#8df0b6"}.get(level, "#8df0b6")
+            self.log_text.append(
+                f'<span style="color:#6b7385">[{timestamp}]</span>'
+                f'<span style="color:{color}">{prefix}{msg}</span>'
+            )
+        if self.auto_scroll_check.isChecked():
+            scrollbar = self.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+
+    def open_fingerprint_dashboard(self) -> None:
+        from autobrowser.ui.fingerprint_dialog import FingerprintDialog
+
+        dialog = FingerprintDialog(APP_CONFIG.data_dir, self)
+        dialog.exec_()
 
     def copy_log_to_clipboard(self) -> None:
         text = self.log_text.toPlainText()
@@ -207,6 +297,12 @@ class AutoBrowserWindow(QMainWindow):
 
     def open_settings(self) -> None:
         dialog = SettingsDialog(APP_CONFIG.data_dir, self)
+        dialog.exec_()
+
+    def open_profile_manager(self) -> None:
+        from autobrowser.ui.profile_manager_dialog import ProfileManagerDialog
+
+        dialog = ProfileManagerDialog(APP_CONFIG.data_dir, self)
         dialog.exec_()
 
     def on_browser_frame_clicked(self, event) -> None:
