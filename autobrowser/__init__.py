@@ -1,0 +1,1 @@
+"""AutoBrowser application package."""

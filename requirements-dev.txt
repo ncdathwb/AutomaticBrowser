@@ -1,0 +1,4 @@
+-r requirements.txt
+
+ruff==0.15.12
+pyinstaller==6.20.0

@@ -3,7 +3,6 @@ from pathlib import Path
 
 import psutil
 
-
 LOCK_FILES = (
     "lockfile",
     "SingletonCookie",

@@ -3,7 +3,6 @@ import win32con
 import win32gui
 import win32process
 
-
 KEYBOARD_FOCUS_CLASSES = (
     "Chrome_RenderWidgetHostHWND",
     "Chrome_WidgetWin_0",
@@ -11,7 +10,7 @@ KEYBOARD_FOCUS_CLASSES = (
 
 
 def embed_window(child_hwnd: int, parent_hwnd: int) -> None:
-    win32gui.ShowWindow(child_hwnd, win32con.SW_RESTORE)
+    win32gui.ShowWindow(child_hwnd, win32con.SW_SHOWNOACTIVATE)
 
     style = win32gui.GetWindowLong(child_hwnd, win32con.GWL_STYLE)
     style = style & ~win32con.WS_CAPTION
@@ -22,10 +21,9 @@ def embed_window(child_hwnd: int, parent_hwnd: int) -> None:
 
     win32gui.SetWindowLong(child_hwnd, win32con.GWL_STYLE, style)
     win32gui.SetParent(child_hwnd, parent_hwnd)
-    win32gui.ShowWindow(child_hwnd, win32con.SW_SHOW)
+    win32gui.ShowWindow(child_hwnd, win32con.SW_SHOWNA)
     force_redraw(parent_hwnd)
     force_redraw(child_hwnd)
-    focus_embedded_window(child_hwnd)
 
 
 def resize_embedded_window(hwnd: int, width: int, height: int) -> None:
@@ -36,9 +34,7 @@ def resize_embedded_window(hwnd: int, width: int, height: int) -> None:
         0,
         width,
         height,
-        win32con.SWP_NOZORDER
-        | win32con.SWP_FRAMECHANGED
-        | win32con.SWP_NOACTIVATE,
+        win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_NOACTIVATE,
     )
     force_redraw(hwnd)
 
@@ -47,28 +43,24 @@ def release_embedded_window(hwnd: int) -> None:
     win32gui.SetParent(hwnd, 0)
 
 
+def stop_taskbar_flash(hwnd: int) -> None:
+    try:
+        win32gui.FlashWindowEx(hwnd, win32con.FLASHW_STOP, 0, 0)
+    except Exception:
+        pass
+
+
 def focus_embedded_window(hwnd: int) -> None:
     focus_hwnd = find_keyboard_focus_window(hwnd) or hwnd
-    root_hwnd = win32gui.GetAncestor(hwnd, win32con.GA_ROOT)
-    foreground_hwnd = win32gui.GetForegroundWindow()
     current_thread_id = win32api.GetCurrentThreadId()
     target_thread_id, _ = win32process.GetWindowThreadProcessId(focus_hwnd)
-    foreground_thread_id = None
-    if foreground_hwnd:
-        foreground_thread_id, _ = win32process.GetWindowThreadProcessId(foreground_hwnd)
     attached_pairs = []
 
     try:
         attach_thread_input(current_thread_id, target_thread_id, attached_pairs)
-        if foreground_thread_id:
-            attach_thread_input(current_thread_id, foreground_thread_id, attached_pairs)
-            attach_thread_input(target_thread_id, foreground_thread_id, attached_pairs)
 
         for action in (
             lambda: win32gui.ShowWindow(hwnd, win32con.SW_SHOW),
-            lambda: win32gui.BringWindowToTop(root_hwnd),
-            lambda: win32gui.SetForegroundWindow(root_hwnd),
-            lambda: win32gui.SetActiveWindow(root_hwnd),
             lambda: win32gui.SetFocus(focus_hwnd),
         ):
             try:
@@ -126,7 +118,5 @@ def force_redraw(hwnd: int) -> None:
         hwnd,
         None,
         None,
-        win32con.RDW_INVALIDATE
-        | win32con.RDW_UPDATENOW
-        | win32con.RDW_ALLCHILDREN,
+        win32con.RDW_INVALIDATE | win32con.RDW_UPDATENOW | win32con.RDW_ALLCHILDREN,
     )
