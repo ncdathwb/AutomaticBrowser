@@ -1,9 +1,11 @@
+import datetime
 import ipaddress
 import json
 import logging
 import os
 import random
 import time
+from pathlib import Path
 
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -60,13 +62,17 @@ class ExternalLoginRequired(RuntimeError):
         self.message = message
 
 
-def run_browser_logic(session: BrowserSession) -> str:
-    return open_target_site(session)
+def run_browser_logic(
+    session: BrowserSession,
+    data_dir: Path | None = None,
+) -> str:
+    return open_target_site(session, data_dir=data_dir)
 
 
 def open_target_site(
     session: BrowserSession,
     url: str = TARGET_URL,
+    data_dir: Path | None = None,
 ) -> str:
     with session.lock:
         driver = session.driver
@@ -77,7 +83,7 @@ def open_target_site(
         logger.info("Mở Google trước để thu thập fingerprint...")
         driver.get(GOOGLE_URL)
         wait_for_dom_complete(driver)
-        log_browser_fingerprint(driver)
+        log_browser_fingerprint(driver, data_dir=data_dir)
 
         logger.info("Mở trang: %s", url)
         driver.get(url)
@@ -659,7 +665,10 @@ def _wait_for_qr_to_appear(
     return False
 
 
-def log_browser_fingerprint(driver: WebDriver) -> None:
+def log_browser_fingerprint(
+    driver: WebDriver,
+    data_dir: Path | None = None,
+) -> None:
     try:
         info = _collect_sync_fingerprint(driver)
     except WebDriverException:
@@ -719,7 +728,14 @@ def log_browser_fingerprint(driver: WebDriver) -> None:
     driver.get("about:blank")
     external_ip, proxy_headers = _collect_browser_network_info(driver)
 
-    _analyze_and_conclude(info, webrtc_result, external_ip, proxy_headers)
+    _analyze_and_conclude(
+        info, webrtc_result, external_ip, proxy_headers, data_dir=data_dir,
+    )
+
+    if data_dir:
+        _save_fingerprint_json(
+            info, webrtc_result, external_ip, proxy_headers, data_dir,
+        )
 
 
 def _collect_sync_fingerprint(driver: WebDriver) -> dict:
@@ -1045,12 +1061,33 @@ def _collect_browser_network_info(driver: WebDriver) -> tuple[str, dict]:
                 }
             }
 
-            var ipPromise = fetch('https://api.ipify.org?format=json', {
-                cache: 'no-store',
-            })
-                .then(function(r) { return r.json(); })
-                .then(function(d) { return d.ip || ''; })
-                .catch(function() { return ''; });
+            function _tryFetchIp(services, index) {
+                index = index || 0;
+                if (index >= services.length) return Promise.resolve('');
+                var url = services[index];
+                return fetch(url, {cache: 'no-store'}).then(function(r) {
+                    if (!r.ok) return _tryFetchIp(services, index + 1);
+                    return r.text().then(function(text) {
+                        text = (text || '').trim();
+                        if (text.startsWith('{')) {
+                            var d = JSON.parse(text);
+                            if (d && d.ip) return d.ip;
+                        } else if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(text)) {
+                            return text;
+                        }
+                        return _tryFetchIp(services, index + 1);
+                    });
+                }).catch(function() {
+                    return _tryFetchIp(services, index + 1);
+                });
+            }
+
+            var ipPromise = _tryFetchIp([
+                'https://api.ipify.org?format=json',
+                'https://api64.ipify.org?format=json',
+                'https://icanhazip.com',
+                'https://ifconfig.me/ip',
+            ]);
 
             var headersPromise = fetch('https://httpbin.org/headers', {
                 cache: 'no-store',
@@ -1134,11 +1171,69 @@ def _extract_global_webrtc_ips(webrtc_ips: str) -> list[str]:
     return global_ips
 
 
+def _save_fingerprint_json(
+    info: dict,
+    webrtc_ips: str,
+    external_ip: str,
+    proxy_headers: dict,
+    data_dir: Path,
+) -> None:
+    fp_dir = data_dir / "fingerprints"
+    try:
+        fp_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("Không thể tạo thư mục fingerprints: %s", fp_dir)
+        return
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    fingerprint_data = {
+        "timestamp": timestamp,
+        "info": {k: str(v) for k, v in info.items() if k != "audioHash"},
+        "audioHash": info.get("audioHash", ""),
+        "webrtcIps": webrtc_ips,
+        "externalIp": external_ip,
+        "proxyHeaders": {str(k): str(v) for k, v in proxy_headers.items()},
+    }
+
+    filepath = fp_dir / f"fp_{timestamp}.json"
+    try:
+        filepath.write_text(
+            json.dumps(fingerprint_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning("Không thể ghi fingerprint: %s", filepath)
+        return
+
+    latest_path = fp_dir / "latest.json"
+    try:
+        latest_path.write_text(
+            json.dumps(fingerprint_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+    logger.info("Đã lưu fingerprint vào: %s", filepath)
+
+
+def _load_previous_fingerprint(data_dir: Path) -> dict | None:
+    latest_path = data_dir / "fingerprints" / "latest.json"
+    if not latest_path.is_file():
+        return None
+    try:
+        return json.loads(latest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.debug("Không đọc được fingerprint trước đó", exc_info=True)
+        return None
+
+
 def _analyze_and_conclude(
     info: dict,
     webrtc_ips: str,
     external_ip: str,
     proxy_headers: dict,
+    data_dir: Path | None = None,
 ) -> None:
     flags: list[tuple[str, str]] = []  # (risk level, message)
 
@@ -1177,6 +1272,17 @@ def _analyze_and_conclude(
     canvas_hash = info.get("canvasHash", "")
     if canvas_hash in ("0", "00000000", ""):
         flags.append(("MEDIUM", "Canvas hash = 0 — không có fingerprint canvas"))
+
+    if data_dir and canvas_hash and canvas_hash != "lỗi":
+        previous = _load_previous_fingerprint(data_dir)
+        if previous:
+            prev_info = previous.get("info", {})
+            prev_canvas = prev_info.get("canvasHash", "")
+            if prev_canvas and prev_canvas != canvas_hash:
+                flags.append((
+                    "MEDIUM",
+                    f"Canvas hash thay đổi so với lần trước ({prev_canvas[:8]}... → {canvas_hash[:8]}...)",
+                ))
 
     # ---- 4. Language vs Timezone ----
     language = str(info.get("language", ""))

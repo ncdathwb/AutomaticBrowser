@@ -24,6 +24,10 @@ from autobrowser.platform.win32_window import (
 logger = logging.getLogger(__name__)
 AUTOMATION_LOGGER_NAME = "autobrowser.browser.automation"
 
+HEALTH_CHECK_INTERVAL_MS = 60_000
+RESOURCE_CHECK_INTERVAL_MS = 5_000
+MEMORY_WARNING_MB = 1024
+
 
 class SignalLogHandler(logging.Handler):
     def __init__(self, signal):
@@ -46,6 +50,7 @@ class BrowserController(QObject):
     browser_embed_requested = pyqtSignal(int)
     browser_resize_requested = pyqtSignal()
     startup_failed = pyqtSignal(str)
+    resource_update = pyqtSignal(float, float)
 
     _browser_ready = pyqtSignal(object)
     _navigation_worker_finished = pyqtSignal(str)
@@ -59,6 +64,8 @@ class BrowserController(QObject):
         self.navigation_thread: threading.Thread | None = None
         self.resize_timer: QTimer | None = None
         self.taskbar_flash_timer: QTimer | None = None
+        self._health_check_timer: QTimer | None = None
+        self._resource_timer: QTimer | None = None
         self.window_hwnd: int | None = None
         self.external_login_url = TARGET_URL
         self.is_closing = False
@@ -156,7 +163,7 @@ class BrowserController(QObject):
             if self.is_closing or not self.session:
                 return
 
-            current_url = run_browser_logic(self.session)
+            current_url = run_browser_logic(self.session, APP_CONFIG.data_dir)
             self._navigation_worker_finished.emit(current_url)
         except ExternalLoginRequired as e:
             logger.info("Cần đăng nhập ngoài: %s", e.url)
@@ -171,6 +178,8 @@ class BrowserController(QObject):
     def _on_navigation_finished(self, _current_url: str) -> None:
         self.browser_resize_requested.emit()
         QTimer.singleShot(300, lambda: self.browser_resize_requested.emit())
+        self.start_health_check()
+        self.start_resource_monitor()
 
     def _on_external_login_required(self, url: str, message: str) -> None:
         if self.is_closing:
@@ -206,6 +215,54 @@ class BrowserController(QObject):
             stop_taskbar_flash(self.window_hwnd)
         except Exception:
             logger.debug("Không tắt được trạng thái nhấp nháy trên thanh tác vụ", exc_info=True)
+
+    def start_health_check(self) -> None:
+        if self._health_check_timer:
+            self._health_check_timer.stop()
+
+        self._health_check_timer = QTimer(self)
+        self._health_check_timer.timeout.connect(self._check_browser_health)
+        self._health_check_timer.start(HEALTH_CHECK_INTERVAL_MS)
+
+    def _check_browser_health(self) -> None:
+        if self.is_closing or not self.session:
+            return
+
+        try:
+            driver = self.session.driver
+            with self.session.lock:
+                driver.execute_script("return 1")
+        except WebDriverException:
+            self.log_message.emit(
+                "Cảnh báo: Trình duyệt không phản hồi. Có thể đã bị crash hoặc đóng."
+            )
+
+    def start_resource_monitor(self) -> None:
+        if self._resource_timer:
+            self._resource_timer.stop()
+
+        self._resource_timer = QTimer(self)
+        self._resource_timer.timeout.connect(self._check_resources)
+        self._resource_timer.start(RESOURCE_CHECK_INTERVAL_MS)
+
+    def _check_resources(self) -> None:
+        if self.is_closing or not self.session:
+            self.resource_update.emit(0.0, 0.0)
+            return
+
+        try:
+            driver_pid = self.session.driver.service.process.pid
+            proc = psutil.Process(driver_pid)
+            cpu = proc.cpu_percent(interval=0.1)
+            rss_mb = proc.memory_info().rss / (1024 * 1024)
+            self.resource_update.emit(round(cpu, 1), round(rss_mb, 1))
+
+            if rss_mb > MEMORY_WARNING_MB:
+                self.log_message.emit(
+                    f"Cảnh báo: Chrome đang dùng {rss_mb:.0f} MB RAM (> {MEMORY_WARNING_MB} MB)"
+                )
+        except (psutil.NoSuchProcess, psutil.AccessDenied, WebDriverException, Exception):
+            self.resource_update.emit(0.0, 0.0)
 
     def show_external_login_prompt(
         self,
@@ -331,6 +388,12 @@ class BrowserController(QObject):
         if self.resize_timer:
             self.resize_timer.stop()
             self.resize_timer = None
+        if self._health_check_timer:
+            self._health_check_timer.stop()
+            self._health_check_timer = None
+        if self._resource_timer:
+            self._resource_timer.stop()
+            self._resource_timer = None
 
         self.stop_browser()
 

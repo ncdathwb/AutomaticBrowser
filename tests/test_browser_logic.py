@@ -41,7 +41,7 @@ class BrowserLogicTests(unittest.TestCase):
     def test_run_browser_logic_keeps_stable_single_argument_contract(self):
         signature = inspect.signature(run_browser_logic)
 
-        self.assertEqual(list(signature.parameters), ["session"])
+        self.assertEqual(list(signature.parameters), ["session", "data_dir"])
         self.assertIs(signature.return_annotation, str)
 
     def test_controller_imports_only_automation_entrypoint(self):

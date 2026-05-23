@@ -132,10 +132,14 @@ class AutoBrowserWindow(QMainWindow):
         self.status_label = QLabel(styles.status_text(styles.INITIAL_STATUS_TEXT))
         self.status_label.setStyleSheet(styles.status_label_style(styles.INITIAL_STATUS_COLOR))
 
+        self.resource_label = QLabel("")
+        self.resource_label.setStyleSheet(styles.RESOURCE_LABEL_STYLE)
+
         log_header.addWidget(self.log_toggle_button)
         log_header.addWidget(self.log_copy_button)
         log_header.addWidget(self.settings_button)
         log_header.addStretch()
+        log_header.addWidget(self.resource_label)
         log_header.addWidget(self.external_login_button)
         log_header.addWidget(self.status_label)
         log_layout.addLayout(log_header)
@@ -155,6 +159,7 @@ class AutoBrowserWindow(QMainWindow):
         self.controller.external_login_visibility_changed.connect(
             self.external_login_button.setVisible
         )
+        self.controller.resource_update.connect(self.set_resource_info)
         self.controller.browser_embed_requested.connect(self.embed_browser)
         self.controller.browser_resize_requested.connect(self.resize_browser_to_frame)
 
@@ -212,6 +217,14 @@ class AutoBrowserWindow(QMainWindow):
             return
 
         self.controller.resume_window_timers()
+
+    def set_resource_info(self, cpu: float, rss_mb: float) -> None:
+        if cpu == 0.0 and rss_mb == 0.0:
+            self.resource_label.setText("")
+            return
+        self.resource_label.setText(
+            f"CPU {cpu:.0f}%  |  RAM {rss_mb:.0f} MB"
+        )
 
     def set_status(self, text: str, color: str) -> None:
         self.status_label.setText(styles.status_text(text))

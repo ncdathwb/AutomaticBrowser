@@ -95,5 +95,12 @@ def status_text(text: str) -> str:
     return f"● {text}"
 
 
+RESOURCE_LABEL_STYLE = """
+    color: #6b7385;
+    font-size: 11px;
+    padding: 0 8px;
+"""
+
+
 def status_label_style(color: str) -> str:
     return f"color: {color}; font-weight: bold;"
