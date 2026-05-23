@@ -31,6 +31,7 @@ class ProfileManagerDialog(QDialog):
         super().__init__(parent)
         self._data_dir = data_dir
         self._store = load_store(data_dir)
+        self.needs_restart = False
         self._build_ui()
         self._populate()
 
@@ -154,11 +155,8 @@ class ProfileManagerDialog(QDialog):
         set_active_profile(self._data_dir, profile_id)
         self._store = load_store(self._data_dir)
         self._populate()
-        QMessageBox.information(
-            self, "Đã chuyển",
-            "Profile đã được chuyển đổi.\n"
-            "Vui lòng khởi động lại ứng dụng.",
-        )
+        self.needs_restart = True
+        self.accept()
 
     def _delete_profile(self) -> None:
         current = self.list_widget.currentItem()

@@ -304,6 +304,8 @@ class AutoBrowserWindow(QMainWindow):
 
         dialog = ProfileManagerDialog(APP_CONFIG.data_dir, self)
         dialog.exec_()
+        if dialog.needs_restart:
+            self._restart_app()
 
     def on_browser_frame_clicked(self, event) -> None:
         self.controller.focus_browser(
@@ -443,16 +445,27 @@ class AutoBrowserWindow(QMainWindow):
             self.tray_icon.hide()
         self.close()
 
+    def _restart_app(self) -> None:
+        import subprocess
+        import sys
+
+        self._quit_requested = True
+        if self.tray_icon:
+            self.tray_icon.hide()
+
+        self.controller.shutdown()
+        self.close()
+
+        subprocess.Popen(
+            [sys.executable] + sys.argv,
+            creationflags=subprocess.DETACHED_PROCESS
+            if sys.platform == "win32"
+            else 0,
+        )
+
     def closeEvent(self, event) -> None:
         if self.tray_icon and self.tray_icon.isVisible() and not self._quit_requested:
             self.hide()
-            self.tray_icon.showMessage(
-                APP_CONFIG.title,
-                "Ứng dụng vẫn đang chạy trong khay hệ thống.\n"
-                "Nhấp đúp để mở lại, hoặc chuột phải → Thoát.",
-                QSystemTrayIcon.Information,
-                3000,
-            )
             event.ignore()
             return
 
