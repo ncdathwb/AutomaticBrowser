@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from autobrowser.app_settings import AppSettings, load_settings, save_settings
 from autobrowser.proxy_config import ProxyConfig, load_proxy_config, save_proxy_config
 
 
@@ -21,6 +22,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._data_dir = data_dir
         self._config = load_proxy_config(data_dir)
+        self._settings = load_settings(data_dir)
         self._build_ui()
         self._load_config()
 
@@ -143,6 +145,33 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(proxy_group)
 
+        # --- General settings ---
+        general_group = QGroupBox("Chung")
+        general_form = QFormLayout(general_group)
+        general_form.setSpacing(8)
+
+        self.headless_check = QCheckBox(
+            "Chạy ẩn (headless) — không hiển thị cửa sổ Chrome"
+        )
+        general_form.addRow("", self.headless_check)
+
+        general_hint = QLabel(
+            "Headless giúp tiết kiệm tài nguyên và chạy ngầm.\n"
+            "Một số trang web có thể phát hiện & chặn headless Chrome."
+        )
+        general_hint.setObjectName("hintLabel")
+        general_hint.setWordWrap(True)
+        general_form.addRow(general_hint)
+
+        general_restart_hint = QLabel(
+            "Thay đổi cần khởi động lại ứng dụng để có hiệu lực."
+        )
+        general_restart_hint.setObjectName("hintLabel")
+        general_restart_hint.setWordWrap(True)
+        general_form.addRow(general_restart_hint)
+
+        layout.addWidget(general_group)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
@@ -178,6 +207,7 @@ class SettingsDialog(QDialog):
         self.user_edit.setText(self._config.username)
         self.pass_edit.setText(self._config.password)
         self._on_enable_toggled(self._config.enabled)
+        self.headless_check.setChecked(self._settings.headless)
 
     def _on_enable_toggled(self, checked: bool) -> None:
         for w in (self.type_combo, self.host_edit, self.port_spin):
@@ -243,6 +273,9 @@ class SettingsDialog(QDialog):
         if not save_proxy_config(new_config, self._data_dir):
             QMessageBox.warning(self, "Lỗi", "Không thể ghi file cấu hình proxy.")
             return
+
+        new_settings = AppSettings(headless=self.headless_check.isChecked())
+        save_settings(self._data_dir, new_settings)
 
         message = (
             "Cấu hình proxy đã được lưu.\n\n"

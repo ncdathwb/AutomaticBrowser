@@ -131,6 +131,7 @@ def build_browser_config(
     return BrowserConfig(
         profile_dir=profile_dir,
         driver_path_cache_file=app_config.runtime_dir / "chromedriver_path.txt",
+        headless=_resolve_headless(app_config.data_dir),
     )
 
 
@@ -140,6 +141,14 @@ def _resolve_profile_dir(data_dir: Path) -> Path:
         return get_active_profile_dir(data_dir)
     except Exception:
         return data_dir / "chrome_profile"
+
+
+def _resolve_headless(data_dir: Path) -> bool:
+    try:
+        from autobrowser.app_settings import load_settings
+        return load_settings(data_dir).headless
+    except Exception:
+        return False
 
 
 load_dotenv_file()
