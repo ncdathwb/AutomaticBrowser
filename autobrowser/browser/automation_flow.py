@@ -27,6 +27,7 @@ from autobrowser.browser.actions.elements import (
 )
 from autobrowser.browser.actions.keyboard import type_text, type_text_human
 from autobrowser.browser.actions.waits import Locator, wait_present, wait_visible
+from autobrowser.browser.captcha import handle_captcha_if_present
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class StepAction(Enum):
     SUBMIT = "submit"
     WAIT_ELEMENT = "wait_element"
     WAIT_SECONDS = "wait_seconds"
+    SOLVE_CAPTCHA = "solve_captcha"
 
 
 _BY_MAP: dict[str, Callable[[str], Locator]] = {
@@ -192,6 +194,8 @@ def _execute_step(driver: WebDriver, step: FlowStep) -> None:
         _step_wait_element(driver, step)
     elif step.action == StepAction.WAIT_SECONDS:
         _step_wait_seconds(step)
+    elif step.action == StepAction.SOLVE_CAPTCHA:
+        _step_solve_captcha(driver, step)
 
 
 def _step_navigate(driver: WebDriver, step: FlowStep) -> None:
@@ -233,6 +237,15 @@ def _step_wait_element(driver: WebDriver, step: FlowStep) -> None:
 def _step_wait_seconds(step: FlowStep) -> None:
     logger.info("Đợi %.1f giây...", step.seconds)
     time.sleep(step.seconds)
+
+
+def _step_solve_captcha(driver: WebDriver, step: FlowStep) -> None:
+    api_key = step.value or ""
+    timeout = step.timeout if step.timeout > 0 else 120.0
+    logger.info("Kiểm tra & giải CAPTCHA (timeout=%.0fs)...", timeout)
+    solved = handle_captcha_if_present(driver, api_key=api_key, timeout=timeout)
+    if not solved:
+        logger.warning("Không giải được CAPTCHA hoặc không tìm thấy CAPTCHA nào")
 
 
 def run_flow_file(driver: WebDriver, path: Path) -> None:

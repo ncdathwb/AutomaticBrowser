@@ -43,3 +43,8 @@ steps:
   # Step 7: Wait for post-login page
   - action: wait_seconds
     seconds: 3
+
+  # Step 8 (optional): Solve CAPTCHA if one appears after login
+  # Uses 2captcha API key from AUTOBROWSER_2CAPTCHA_API_KEY env var
+  # - action: solve_captcha
+  #   timeout: 120
